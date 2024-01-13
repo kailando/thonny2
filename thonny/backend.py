@@ -1,89 +1,38 @@
-# -*- coding: utf-8 -*-
-import _thread
-import io
-import os.path
-import pathlib
-import queue
-import stat
-import sys
-import threading
-import time
-import traceback
-import warnings
+import _thread,io,os.path,pathlib,queue,stat,sys,threading,time,traceback,warnings
 from abc import ABC, abstractmethod
 from logging import getLogger
 from typing import Any, BinaryIO, Callable, Dict, Iterable, List, Optional, Tuple, Union
-
 import thonny
-from thonny import report_time
-from thonny.common import (  # TODO: try to get rid of this
-    IGNORED_FILES_AND_DIRS,
-    PROCESS_ACK,
-    BackendEvent,
-    CommandToBackend,
-    EOFCommand,
-    ImmediateCommand,
-    InlineCommand,
-    InlineResponse,
-    InputSubmission,
-    MessageFromBackend,
-    ToplevelCommand,
-    ToplevelResponse,
-    UserError,
-    execute_with_frontend_sys_path,
-    is_local_path,
-    parse_message,
-    read_one_incoming_message_str,
-    serialize_message,
-    try_load_modules_with_frontend_sys_path,
-    universal_dirname,
-)
-
-NEW_DIR_MODE = 0o755
-
-
-logger = getLogger(__name__)
-
-
+from thonny.common import IGNORED_FILES_AND_DIRS,PROCESS_ACK,BackendEvent,CommandToBackend,EOFCommand,ImmediateCommand,InlineCommand,InlineResponse,InputSubmission,MessageFromBackend,ToplevelCommand,ToplevelResponse,UserError,execute_with_frontend_sys_path,is_local_path,parse_message,read_one_incoming_message_str,serialize_message,try_load_modules_with_frontend_sys_path,universal_dirname
+NEW_DIR_MODE=0o755
+logger=getLogger(__name__)
 class BaseBackend(ABC):
-    """Methods for both MainBackend and forwarding backend"""
-
     def __init__(self):
-        self._current_command = None
-        self._incoming_message_queue = queue.Queue()  # populated by the reader thread
-        self._interrupt_lock = threading.Lock()
-        self._last_progress_reporting_time = 0
-        self._last_sent_output = ""
+        self._current_command=None
+        self._incoming_message_queue=queue.Queue()  # populated by the reader thread
+        self._interrupt_lock=threading.Lock()
+        self._last_progress_reporting_time=0
+        self._last_sent_output=""
         self._init_command_reader()
-
     def _init_command_reader(self):
-        # NB! This approach is used only in MicroPython and SshCPython backend.
-        # MainCPython backend uses main thread for reading commands
-        # https://github.com/thonny/thonny/issues/1363
         threading.Thread(target=self._read_incoming_messages, daemon=True).start()
-
     def mainloop(self):
-        report_time("Beginning of mainloop")
-
+        thonny.report_time("Beginning of mainloop")
         try:
             while True:
                 self._check_for_connection_error()
-                try:
-                    msg = self._fetch_next_incoming_message(timeout=0.01)
+                try:msg=self._fetch_next_incoming_message(timeout=0.01)
                 except KeyboardInterrupt:
-                    self._send_output(
-                        "\nKeyboardInterrupt", "stderr"
-                    )  # CPython idle REPL does this
+                    self._send_output("\nKeyboardInterrupt", "stderr")
                     self.send_message(ToplevelResponse())
-                except queue.Empty:
-                    self._perform_idle_tasks()
+                except queue.Empty:self._perform_idle_tasks()
                 else:
                     if isinstance(msg, InputSubmission):
                         self._handle_user_input(msg)
                     elif isinstance(msg, EOFCommand):
                         self._handle_eof_command(msg)
                     else:
-                        self._current_command = msg
+                        self._current_command=msg
                         self._handle_normal_command(msg)
         except KeyboardInterrupt:
             self._send_output("\nKeyboardInterrupt", "stderr")
@@ -100,7 +49,7 @@ class BaseBackend(ABC):
 
     def handle_connection_error(self, error=None):
         logger.info("Handling connection error")
-        message = "Connection lost"
+        message="Connection lost"
         if error:
             message += " -- " + str(error)
         self._send_output("\n" + message + "\n", "stderr")
@@ -129,7 +78,7 @@ class BaseBackend(ABC):
                 description=description,
             )
         )
-        self._last_progress_reporting_time = time.time()
+        self._last_progress_reporting_time=time.time()
 
     def _report_current_action(self, cmd, description: str) -> None:
         self.send_message(
@@ -147,11 +96,11 @@ class BaseBackend(ABC):
                 break
 
     def _read_one_incoming_message(self):
-        msg_str = read_one_incoming_message_str(self._read_incoming_msg_line)
+        msg_str=read_one_incoming_message_str(self._read_incoming_msg_line)
         if not msg_str:
             return False
 
-        msg = parse_message(msg_str)
+        msg=parse_message(msg_str)
         if isinstance(msg, ImmediateCommand):
             # This will be handled right away
             self._handle_immediate_command(msg)
@@ -163,20 +112,20 @@ class BaseBackend(ABC):
         self, response: Union[MessageFromBackend, Dict, None], command: CommandToBackend
     ) -> MessageFromBackend:
         if response is None:
-            response = {}
+            response={}
 
         if "id" in command and "command_id" not in response:
-            response["command_id"] = command["id"]
+            response["command_id"]=command["id"]
 
         if isinstance(response, MessageFromBackend):
             if "command_name" not in response:
-                response["command_name"] = command["name"]
+                response["command_name"]=command["name"]
             return response
         else:
             if isinstance(response, dict):
-                args = response
+                args=response
             else:
-                args = {}
+                args={}
 
             if isinstance(command, ToplevelCommand):
                 return ToplevelResponse(command_name=command.name, **args)
@@ -192,9 +141,9 @@ class BaseBackend(ABC):
         if not data:
             return
 
-        data = self._transform_output(data, stream_name)
-        msg = BackendEvent(event_type="ProgramOutput", stream_name=stream_name, data=data)
-        self._last_sent_output = data
+        data=self._transform_output(data, stream_name)
+        msg=BackendEvent(event_type="ProgramOutput", stream_name=stream_name, data=data)
+        self._last_sent_output=data
         self.send_message(msg)
 
     def _transform_output(self, data, stream_name):
@@ -208,9 +157,9 @@ class BaseBackend(ABC):
         pass
 
     def _report_internal_exception(self, msg: str) -> None:
-        user_msg = "PROBLEM IN THONNY'S BACK-END: " + msg
+        user_msg="PROBLEM IN THONNY'S BACK-END: " + msg
         if sys.exc_info()[1]:
-            err_msg = "\n".join(
+            err_msg="\n".join(
                 traceback.format_exception_only(sys.exc_info()[0], sys.exc_info()[1])
             ).strip()
             user_msg += f" ({err_msg})"
@@ -220,7 +169,7 @@ class BaseBackend(ABC):
         print(user_msg, file=sys.stderr)
 
     def _report_internal_warning(self, msg: str) -> None:
-        user_msg = f"Warning: {msg}.\nSee backend.log for more info."
+        user_msg=f"Warning: {msg}.\nSee backend.log for more info."
         print(user_msg, file=sys.stderr)
 
     @abstractmethod
@@ -248,8 +197,8 @@ class MainBackend(BaseBackend, ABC):
     """Backend which does not forward to another backend"""
 
     def __init__(self):
-        self._command_handlers = {}
-        self._jedi_is_loaded = False
+        self._command_handlers={}
+        self._jedi_is_loaded=False
         BaseBackend.__init__(self)
 
     def add_command(self, command_name, handler):
@@ -258,7 +207,7 @@ class MainBackend(BaseBackend, ABC):
         Handler may return None (in this case no response is sent to frontend)
         or a BackendResponse
         """
-        self._command_handlers[command_name] = handler
+        self._command_handlers[command_name]=handler
 
     def send_message(self, msg: MessageFromBackend) -> None:
         super().send_message(msg)
@@ -272,32 +221,32 @@ class MainBackend(BaseBackend, ABC):
         logger.debug("Command: %r", cmd)
 
         if cmd.name in self._command_handlers:
-            handler = self._command_handlers[cmd.name]
+            handler=self._command_handlers[cmd.name]
         else:
-            handler = getattr(self, "_cmd_" + cmd.name, None)
+            handler=getattr(self, "_cmd_" + cmd.name, None)
 
         if handler is None:
             if isinstance(cmd, ToplevelCommand):
                 self._send_output(f"Unknown command '{cmd.name}'", "stderr")
-            response = {"error": "Unknown command: " + cmd.name}
+            response={"error": "Unknown command: " + cmd.name}
         else:
             try:
-                response = handler(cmd)
+                response=handler(cmd)
                 # Exceptions must be caused by Thonny or plugins code, because the ones
                 # from user code are caught at execution places
             except UserError as e:
                 logger.info("UserError while handling %r", cmd.name, exc_info=True)
                 if isinstance(cmd, ToplevelCommand):
                     print(str(e), file=sys.stderr)
-                    response = {}
+                    response={}
                 else:
-                    response = {"error": str(e)}
+                    response={"error": str(e)}
             except KeyboardInterrupt as e:
                 if isinstance(cmd, ToplevelCommand):
                     print(str(e), file=sys.stderr)
-                    response = {}
+                    response={}
                 else:
-                    response = {"error": "Interrupted", "interrupted": True}
+                    response={"error": "Interrupted", "interrupted": True}
             except Exception as e:
                 logger.exception("Exception while handling %r", cmd.name)
                 self._report_internal_exception("Exception while handling %r" % cmd.name)
@@ -307,12 +256,12 @@ class MainBackend(BaseBackend, ABC):
             # Command doesn't want to send any response
             return
 
-        real_response = self._prepare_command_response(response, cmd)
+        real_response=self._prepare_command_response(response, cmd)
         self.send_message(real_response)
 
     def _cmd_get_dirs_children_info(self, cmd):
         """Provides information about immediate children of paths opened in a file browser"""
-        data = {
+        data={
             path: self._get_filtered_dir_children_info(path, cmd["include_hidden"])
             for path in cmd["paths"]
         }
@@ -328,17 +277,17 @@ class MainBackend(BaseBackend, ABC):
         return {"all_items": self._get_paths_info(cmd.source_paths, recurse=True)}
 
     def _cmd_shell_autocomplete(self, cmd):
-        error = None
+        error=None
         try:
             from thonny import jedi_utils
         except ImportError:
-            completions = []
-            error = "Could not import jedi"
+            completions=[]
+            error="Could not import jedi"
         else:
             import __main__
 
             with warnings.catch_warnings():
-                completions = jedi_utils.get_interpreter_completions(
+                completions=jedi_utils.get_interpreter_completions(
                     cmd.source, [__main__.__dict__], sys_path=self._get_sys_path_for_analysis()
                 )
 
@@ -352,11 +301,11 @@ class MainBackend(BaseBackend, ABC):
 
     def _cmd_editor_autocomplete(self, cmd):
         logger.debug("Starting _cmd_editor_autocomplete")
-        error = None
+        error=None
         try:
             from thonny import jedi_utils
 
-            sys_path = self._get_sys_path_for_analysis()
+            sys_path=self._get_sys_path_for_analysis()
 
             # add current dir for local files
             """
@@ -366,7 +315,7 @@ class MainBackend(BaseBackend, ABC):
             """
 
             with warnings.catch_warnings():
-                completions = jedi_utils.get_script_completions(
+                completions=jedi_utils.get_script_completions(
                     cmd.source,
                     cmd.row,
                     cmd.column,
@@ -374,8 +323,8 @@ class MainBackend(BaseBackend, ABC):
                     sys_path=sys_path,
                 )
         except ImportError:
-            completions = []
-            error = "Could not import jedi"
+            completions=[]
+            error="Could not import jedi"
 
         return dict(
             source=cmd.source,
@@ -399,7 +348,7 @@ class MainBackend(BaseBackend, ABC):
     def _cmd_get_editor_calltip(self, cmd):
         from thonny import jedi_utils
 
-        signatures = jedi_utils.get_script_signatures(
+        signatures=jedi_utils.get_script_signatures(
             cmd.source,
             cmd.row,
             cmd.column,
@@ -419,7 +368,7 @@ class MainBackend(BaseBackend, ABC):
         import __main__
         from thonny import jedi_utils
 
-        signatures = jedi_utils.get_interpreter_signatures(
+        signatures=jedi_utils.get_interpreter_signatures(
             cmd.source, [__main__.__dict__], sys_path=self._get_sys_path_for_analysis()
         )
         return InlineResponse(
@@ -434,7 +383,7 @@ class MainBackend(BaseBackend, ABC):
     def _cmd_highlight_occurrences(self, cmd):
         from thonny import jedi_utils
 
-        refs = jedi_utils.get_references(
+        refs=jedi_utils.get_references(
             cmd.source,
             cmd.row,
             cmd.column,
@@ -448,7 +397,7 @@ class MainBackend(BaseBackend, ABC):
     def _cmd_get_definitions(self, cmd):
         from thonny import jedi_utils
 
-        defs = jedi_utils.get_definitions(
+        defs=jedi_utils.get_definitions(
             cmd.source,
             cmd.row,
             cmd.column,
@@ -470,38 +419,38 @@ class MainBackend(BaseBackend, ABC):
         return None
 
     def _get_paths_info(self, paths: List[str], recurse: bool) -> Dict[str, Dict]:
-        result = {}
+        result={}
 
         for path in paths:
-            info = self._get_path_info(path)
+            info=self._get_path_info(path)
             if info is not None:
-                info["anchor"] = path
-                result[path] = info
+                info["anchor"]=path
+                result[path]=info
 
             if recurse and info is not None and info["kind"] == "dir":
-                desc_infos = self._get_dir_descendants_info(path)
+                desc_infos=self._get_dir_descendants_info(path)
                 for key in desc_infos:
-                    desc_infos[key]["anchor"] = path
+                    desc_infos[key]["anchor"]=path
                 result.update(desc_infos)
 
         return result
 
-    def _get_dir_descendants_info(self, path: str, include_hidden: bool = False) -> Dict[str, Dict]:
+    def _get_dir_descendants_info(self, path: str, include_hidden: bool=False) -> Dict[str, Dict]:
         """Assumes path is dir. Dict is keyed by full path"""
-        result = {}
-        children_info = self._get_filtered_dir_children_info(path, include_hidden)
+        result={}
+        children_info=self._get_filtered_dir_children_info(path, include_hidden)
         for child_name, child_info in children_info.items():
-            full_child_path = path + self._get_sep() + child_name
-            result[full_child_path] = child_info
+            full_child_path=path + self._get_sep() + child_name
+            result[full_child_path]=child_info
             if child_info["kind"] == "dir":
                 result.update(self._get_dir_descendants_info(full_child_path))
 
         return result
 
     def _get_filtered_dir_children_info(
-        self, path: str, include_hidden: bool = False
+        self, path: str, include_hidden: bool=False
     ) -> Optional[Dict[str, Dict]]:
-        children = self._get_dir_children_info(path, include_hidden)
+        children=self._get_dir_children_info(path, include_hidden)
         if children is None:
             return None
 
@@ -513,7 +462,7 @@ class MainBackend(BaseBackend, ABC):
 
     @abstractmethod
     def _get_dir_children_info(
-        self, path: str, include_hidden: bool = False
+        self, path: str, include_hidden: bool=False
     ) -> Optional[Dict[str, Dict]]:
         """For existing dirs returns Dict[child_short_name, Dict of its information].
         Returns None if path doesn't exist or is not a dir.
@@ -528,10 +477,10 @@ class MainBackend(BaseBackend, ABC):
             return
         logger.info("Loading Jedi")
 
-        report_time("Before loading Jedi")
+        thonny.report_time("Before loading Jedi")
         try_load_modules_with_frontend_sys_path(["jedi", "parso"])
-        self._jedi_is_loaded = True
-        report_time("After loading Jedi")
+        self._jedi_is_loaded=True
+        thonny.report_time("After loading Jedi")
 
 
 class UploadDownloadMixin(ABC):
@@ -539,7 +488,7 @@ class UploadDownloadMixin(ABC):
     and therefore is able to upload/download"""
 
     def _cmd_download(self, cmd):
-        errors = self._transfer_files_and_dirs(
+        errors=self._transfer_files_and_dirs(
             cmd.items, self._ensure_local_directory, self._download_file, cmd, pathlib.Path
         )
         return {"errors": errors}
@@ -550,7 +499,7 @@ class UploadDownloadMixin(ABC):
                 source_path, target_path, callback, cmd["make_shebang_scripts_executable"]
             )
 
-        errors = self._transfer_files_and_dirs(
+        errors=self._transfer_files_and_dirs(
             cmd.items,
             self._ensure_remote_directory,
             upload_file_wrapper,
@@ -566,7 +515,7 @@ class UploadDownloadMixin(ABC):
         with io.BytesIO() as fp:
             self._read_file(cmd["path"], fp, callback)
             fp.seek(0)
-            content_bytes = fp.read()
+            content_bytes=fp.read()
 
         return {"content_bytes": content_bytes, "path": cmd["path"]}
 
@@ -600,17 +549,17 @@ class UploadDownloadMixin(ABC):
         cmd,
         target_path_class,
     ) -> List[str]:
-        total_cost = 0
+        total_cost=0
         for item in items:
             if item["kind"] == "file":
                 total_cost += item["size"] + self._get_file_fixed_cost()
             else:
                 total_cost += self._get_dir_transfer_cost()
 
-        completed_cost = 0
-        errors = []
+        completed_cost=0
+        errors=[]
 
-        ensured_dirs = set()
+        ensured_dirs=set()
 
         def ensure_dir(path):
             if path in ensured_dirs:
@@ -622,8 +571,8 @@ class UploadDownloadMixin(ABC):
             self._report_progress(cmd, "Starting", completed_cost, total_cost)
 
             def copy_bytes_notifier(completed_bytes, total_bytes):
-                completed = completed_cost + completed_bytes
-                desc = str(round(completed / total_cost * 100)) + "%"
+                completed=completed_cost + completed_bytes
+                desc=str(round(completed / total_cost * 100)) + "%"
 
                 self._report_progress(cmd, desc, completed, total_cost)
 
@@ -720,26 +669,26 @@ class RemoteProcess:
     """Modelled after subprocess.Popen"""
 
     def __init__(self, client, channel, stdin, stdout, pid):
-        self._client = client
-        self._channel = channel
-        self.stdin = stdin
-        self.stdout = stdout
-        self.pid = pid
-        self.returncode = None
+        self._client=client
+        self._channel=channel
+        self.stdin=stdin
+        self.stdout=stdout
+        self.pid=pid
+        self.returncode=None
 
     def poll(self):
         if self._channel.exit_status_ready():
-            self.returncode = self._channel.recv_exit_status()
+            self.returncode=self._channel.recv_exit_status()
             return self.returncode
         else:
             return None
 
     def wait(self):
-        self.returncode = self._channel.recv_exit_status()
+        self.returncode=self._channel.recv_exit_status()
         return self.returncode
 
     def kill(self):
-        _, stdout, _ = self._client.exec_command("kill -9 %s" % self.pid)
+        _, stdout, _=self._client.exec_command("kill -9 %s" % self.pid)
         # wait until completion
         stdout.channel.recv_exit_status()
 
@@ -751,14 +700,14 @@ class SshMixin(UploadDownloadMixin):
         import paramiko
         from paramiko.client import AutoAddPolicy, SSHClient
 
-        self._host = host
-        self._user = user
-        self._password = password
-        self._target_interpreter = interpreter
-        self._cwd = cwd
-        self._proc = None  # type: Optional[RemoteProcess]
-        self._sftp = None  # type: Optional[paramiko.SFTPClient]
-        self._client = SSHClient()
+        self._host=host
+        self._user=user
+        self._password=password
+        self._target_interpreter=interpreter
+        self._cwd=cwd
+        self._proc=None  # type: Optional[RemoteProcess]
+        self._sftp=None  # type: Optional[paramiko.SFTPClient]
+        self._client=SSHClient()
         self._client.load_system_host_keys()
         self._client.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
         # TODO: does it get closed properly after process gets killed?
@@ -805,21 +754,21 @@ class SshMixin(UploadDownloadMixin):
         # * change to desired directory
         #
         # About -onlcr: https://stackoverflow.com/q/35887380/261181
-        cmd_line_str = (
+        cmd_line_str=(
             "echo $$ ; stty -echo ; stty -onlcr ; "
             + (" cd %s  2> /dev/null ;" % shlex.quote(cwd) if cwd else "")
             + (" exec " + " ".join(map(shlex.quote, cmd_items)))
         )
-        stdin, stdout, _ = self._client.exec_command(
+        stdin, stdout, _=self._client.exec_command(
             cmd_line_str, bufsize=0, get_pty=True, environment=env
         )
 
         # stderr gets directed to stdout because of pty
-        pid = stdout.readline().strip()
-        ack = stdout.readline().strip()
+        pid=stdout.readline().strip()
+        ack=stdout.readline().strip()
         if ack != PROCESS_ACK:
             raise RuntimeError(f"Got {ack!r} instead of expected {PROCESS_ACK!r}")
-        channel = stdout.channel
+        channel=stdout.channel
 
         return RemoteProcess(self._client, channel, stdin, stdout, pid)
 
@@ -843,13 +792,13 @@ class SshMixin(UploadDownloadMixin):
     def _get_sftp(self, fresh: bool):
         if fresh and self._sftp is not None:
             self._sftp.close()
-            self._sftp = None
+            self._sftp=None
 
         if self._sftp is None:
             import paramiko
 
             # TODO: does it get closed properly after process gets killed?
-            self._sftp = paramiko.SFTPClient.from_transport(self._client.get_transport())
+            self._sftp=paramiko.SFTPClient.from_transport(self._client.get_transport())
 
         return self._sftp
 
@@ -870,9 +819,9 @@ class SshMixin(UploadDownloadMixin):
     ) -> None:
         logger.info("Writing bytes to %r", target_path)
         if make_shebang_scripts_executable:
-            source_fp, has_shebang = convert_newlines_if_has_shebang(source_fp)
+            source_fp, has_shebang=convert_newlines_if_has_shebang(source_fp)
         else:
-            has_shebang = None
+            has_shebang=None
 
         self._perform_sftp_operation_with_retry(
             lambda sftp: sftp.putfo(source_fp, target_path, callback)
@@ -910,16 +859,16 @@ def _longest_common_path_prefix(str_paths, path_class):
     if len(str_paths) == 1:
         return str_paths[0]
 
-    list_of_parts = []
+    list_of_parts=[]
     for str_path in str_paths:
         list_of_parts.append(path_class(str_path).parts)
 
-    first = list_of_parts[0]
-    rest = list_of_parts[1:]
+    first=list_of_parts[0]
+    rest=list_of_parts[1:]
 
-    i = 0
+    i=0
     while i < len(first):
-        item_i = first[i]
+        item_i=first[i]
         if not all([len(x) > i and x[i] == item_i for x in rest]):
             break
         else:
@@ -928,9 +877,9 @@ def _longest_common_path_prefix(str_paths, path_class):
     if i == 0:
         return ""
 
-    result = path_class(first[0])
+    result=path_class(first[0])
     for j in range(1, i):
-        result = result.joinpath(first[j])
+        result=result.joinpath(first[j])
 
     return str(result)
 
@@ -944,7 +893,7 @@ def ensure_posix_directory(
 
     for step in list(reversed(list(map(str, pathlib.PurePosixPath(path).parents)))) + [path]:
         if step != "/":
-            mode = stat_mode_fun(step)
+            mode=stat_mode_fun(step)
             if mode is None:
                 mkdir_fun(step)
             elif not stat.S_ISDIR(mode):
@@ -962,8 +911,8 @@ def interrupt_local_process() -> None:
         # https://stackoverflow.com/a/51122690/261181
         import ctypes
 
-        ucrtbase = ctypes.CDLL("ucrtbase")
-        c_raise = ucrtbase["raise"]
+        ucrtbase=ctypes.CDLL("ucrtbase")
+        c_raise=ucrtbase["raise"]
         c_raise(signal.SIGINT)
     else:
         # Does not give KeyboardInterrupt in Windows
@@ -985,7 +934,7 @@ def delete_stored_ssh_password():
 def convert_newlines_if_has_shebang(fp: BinaryIO) -> Tuple[BinaryIO, bool]:
     if fp.read(3) == b"#!/":
         fp.seek(0)
-        new_fp = io.BytesIO()
+        new_fp=io.BytesIO()
         new_fp.write(fp.read().replace(b"\r\n", b"\n"))
         fp.close()
         new_fp.seek(0)
